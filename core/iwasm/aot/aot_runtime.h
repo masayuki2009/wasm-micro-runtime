@@ -32,6 +32,8 @@ typedef enum AOTExceptionID {
     EXCE_CALL_UNLINKED_IMPORT_FUNC,
     EXCE_NATIVE_STACK_OVERFLOW,
     EXCE_UNALIGNED_ATOMIC,
+    EXCE_AUX_STACK_OVERFLOW,
+    EXCE_AUX_STACK_UNDERFLOW,
     EXCE_NUM,
 } AOTExceptionID;
 
@@ -495,6 +497,10 @@ aot_clear_exception(AOTModuleInstance *module_inst);
 uint32
 aot_module_malloc(AOTModuleInstance *module_inst, uint32 size,
                   void **p_native_addr);
+
+uint32
+aot_module_realloc(AOTModuleInstance *module_inst, uint32 ptr,
+                   uint32 size, void **p_native_addr);
 
 void
 aot_module_free(AOTModuleInstance *module_inst, uint32 ptr);

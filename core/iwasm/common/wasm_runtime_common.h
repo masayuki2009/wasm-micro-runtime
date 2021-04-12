@@ -25,6 +25,230 @@
 extern "C" {
 #endif
 
+#if WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS != 0
+
+#define PUT_I64_TO_ADDR(addr, value) do {       \
+    *(int64*)(addr) = (int64)(value);           \
+  } while (0)
+#define PUT_F64_TO_ADDR(addr, value) do {       \
+    *(float64*)(addr) = (float64)(value);       \
+  } while (0)
+
+#define GET_I64_FROM_ADDR(addr) (*(int64*)(addr))
+#define GET_F64_FROM_ADDR(addr) (*(float64*)(addr))
+
+/* For STORE opcodes */
+#define STORE_I64 PUT_I64_TO_ADDR
+#define STORE_U32(addr, value) do {             \
+    *(uint32*)(addr) = (uint32)(value);         \
+  } while (0)
+#define STORE_U16(addr, value) do {             \
+    *(uint16*)(addr) = (uint16)(value);         \
+  } while (0)
+
+/* For LOAD opcodes */
+#define LOAD_I64(addr) (*(int64*)(addr))
+#define LOAD_F64(addr) (*(float64*)(addr))
+#define LOAD_I32(addr) (*(int32*)(addr))
+#define LOAD_U32(addr) (*(uint32*)(addr))
+#define LOAD_I16(addr) (*(int16*)(addr))
+#define LOAD_U16(addr) (*(uint16*)(addr))
+
+#define STORE_PTR(addr, ptr) do {               \
+    *(void**)addr = (void*)ptr;                 \
+  } while (0)
+#define LOAD_PTR(addr) (*(void**)(addr))
+
+#else  /* WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS != 0 */
+
+#define PUT_I64_TO_ADDR(addr, value) do {       \
+    uint32 *addr_u32 = (uint32*)(addr);         \
+    union { int64 val; uint32 parts[2]; } u;    \
+    u.val = (int64)(value);                     \
+    addr_u32[0] = u.parts[0];                   \
+    addr_u32[1] = u.parts[1];                   \
+  } while (0)
+#define PUT_F64_TO_ADDR(addr, value) do {       \
+    uint32 *addr_u32 = (uint32*)(addr);         \
+    union { float64 val; uint32 parts[2]; } u;  \
+    u.val = (value);                            \
+    addr_u32[0] = u.parts[0];                   \
+    addr_u32[1] = u.parts[1];                   \
+  } while (0)
+
+static inline int64
+GET_I64_FROM_ADDR(uint32 *addr)
+{
+    union { int64 val; uint32 parts[2]; } u;
+    u.parts[0] = addr[0];
+    u.parts[1] = addr[1];
+    return u.val;
+}
+
+static inline float64
+GET_F64_FROM_ADDR (uint32 *addr)
+{
+    union { float64 val; uint32 parts[2]; } u;
+    u.parts[0] = addr[0];
+    u.parts[1] = addr[1];
+    return u.val;
+}
+
+/* For STORE opcodes */
+#define STORE_I64(addr, value) do {             \
+    uintptr_t addr1 = (uintptr_t)(addr);        \
+    union { int64 val; uint32 u32[2];           \
+            uint16 u16[4]; uint8 u8[8]; } u;    \
+    if ((addr1 & (uintptr_t)7) == 0)            \
+      *(int64*)(addr) = (int64)(value);         \
+    else {                                      \
+        u.val = (int64)(value);                 \
+        if ((addr1 & (uintptr_t)3) == 0) {      \
+            ((uint32*)(addr))[0] = u.u32[0];    \
+            ((uint32*)(addr))[1] = u.u32[1];    \
+        }                                       \
+        else if ((addr1 & (uintptr_t)1) == 0) { \
+            ((uint16*)(addr))[0] = u.u16[0];    \
+            ((uint16*)(addr))[1] = u.u16[1];    \
+            ((uint16*)(addr))[2] = u.u16[2];    \
+            ((uint16*)(addr))[3] = u.u16[3];    \
+        }                                       \
+        else {                                  \
+            int32 t;                            \
+            for (t = 0; t < 8; t++)             \
+                ((uint8*)(addr))[t] = u.u8[t];  \
+        }                                       \
+    }                                           \
+  } while (0)
+
+#define STORE_U32(addr, value) do {             \
+    uintptr_t addr1 = (uintptr_t)(addr);        \
+    union { uint32 val;                         \
+            uint16 u16[2]; uint8 u8[4]; } u;    \
+    if ((addr1 & (uintptr_t)3) == 0)            \
+      *(uint32*)(addr) = (uint32)(value);       \
+    else {                                      \
+        u.val = (uint32)(value);                \
+        if ((addr1 & (uintptr_t)1) == 0) {      \
+            ((uint16*)(addr))[0] = u.u16[0];    \
+            ((uint16*)(addr))[1] = u.u16[1];    \
+        }                                       \
+        else {                                  \
+            ((uint8*)(addr))[0] = u.u8[0];      \
+            ((uint8*)(addr))[1] = u.u8[1];      \
+            ((uint8*)(addr))[2] = u.u8[2];      \
+            ((uint8*)(addr))[3] = u.u8[3];      \
+        }                                       \
+    }                                           \
+  } while (0)
+
+#define STORE_U16(addr, value) do {             \
+    union { uint16 val; uint8 u8[2]; } u;       \
+    u.val = (uint16)(value);                    \
+    ((uint8*)(addr))[0] = u.u8[0];              \
+    ((uint8*)(addr))[1] = u.u8[1];              \
+  } while (0)
+
+/* For LOAD opcodes */
+static inline int64
+LOAD_I64(void *addr)
+{
+    uintptr_t addr1 = (uintptr_t)addr;
+    union { int64 val; uint32 u32[2];
+            uint16 u16[4]; uint8 u8[8]; } u;
+    if ((addr1 & (uintptr_t)7) == 0)
+        return *(int64*)addr;
+
+    if ((addr1 & (uintptr_t)3) == 0) {
+        u.u32[0] = ((uint32*)addr)[0];
+        u.u32[1] = ((uint32*)addr)[1];
+    }
+    else if ((addr1 & (uintptr_t)1) == 0) {
+        u.u16[0] = ((uint16*)addr)[0];
+        u.u16[1] = ((uint16*)addr)[1];
+        u.u16[2] = ((uint16*)addr)[2];
+        u.u16[3] = ((uint16*)addr)[3];
+    }
+    else {
+        int32 t;
+        for (t = 0; t < 8; t++)
+            u.u8[t] = ((uint8*)addr)[t];
+    }
+    return u.val;
+}
+
+static inline float64
+LOAD_F64(void *addr)
+{
+    uintptr_t addr1 = (uintptr_t)addr;
+    union { float64 val; uint32 u32[2];
+            uint16 u16[4]; uint8 u8[8]; } u;
+    if ((addr1 & (uintptr_t)7) == 0)
+        return *(float64*)addr;
+
+    if ((addr1 & (uintptr_t)3) == 0) {
+        u.u32[0] = ((uint32*)addr)[0];
+        u.u32[1] = ((uint32*)addr)[1];
+    }
+    else if ((addr1 & (uintptr_t)1) == 0) {
+        u.u16[0] = ((uint16*)addr)[0];
+        u.u16[1] = ((uint16*)addr)[1];
+        u.u16[2] = ((uint16*)addr)[2];
+        u.u16[3] = ((uint16*)addr)[3];
+    }
+    else {
+        int32 t;
+        for (t = 0; t < 8; t++)
+            u.u8[t] = ((uint8*)addr)[t];
+    }
+    return u.val;
+}
+
+static inline int32
+LOAD_I32(void *addr)
+{
+    uintptr_t addr1 = (uintptr_t)addr;
+    union { int32 val; uint16 u16[2]; uint8 u8[4]; } u;
+    if ((addr1 & (uintptr_t)3) == 0)
+        return *(int32*)addr;
+
+    if ((addr1 & (uintptr_t)1) == 0) {
+        u.u16[0] = ((uint16*)addr)[0];
+        u.u16[1] = ((uint16*)addr)[1];
+    }
+    else {
+        u.u8[0] = ((uint8*)addr)[0];
+        u.u8[1] = ((uint8*)addr)[1];
+        u.u8[2] = ((uint8*)addr)[2];
+        u.u8[3] = ((uint8*)addr)[3];
+    }
+    return u.val;
+}
+
+static inline int16
+LOAD_I16(void *addr)
+{
+    uintptr_t addr1 = (uintptr_t)addr;
+    union { int16 val; uint8 u8[2]; } u;
+    if ((addr1 & (uintptr_t)1)) {
+        u.u8[0] = ((uint8*)addr)[0];
+        u.u8[1] = ((uint8*)addr)[1];
+        return u.val;
+    }
+    return *(int16*)addr;
+}
+
+#define LOAD_U32(addr) ((uint32)LOAD_I32(addr))
+#define LOAD_U16(addr) ((uint16)LOAD_I16(addr))
+
+#if UINTPTR_MAX == UINT32_MAX
+#define STORE_PTR(addr, ptr) STORE_U32(addr, (uintptr_t)ptr)
+#elif UINTPTR_MAX == UINT64_MAX
+#define STORE_PTR(addr, ptr) STORE_I64(addr, (uintptr_t)ptr)
+#endif
+
+#endif  /* WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS != 0 */
+
 typedef struct WASMModuleCommon {
     /* Module type, for module loaded from WASM bytecode binary,
        this field is Wasm_Module_Bytecode, and this structure should
@@ -113,34 +337,34 @@ typedef package_type_t PackageType;
 typedef wasm_section_t WASMSection, AOTSection;
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_init(void);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_full_init(RuntimeInitArgs *init_args);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_destroy(void);
 
 /* See wasm_export.h for description */
-PackageType
+WASM_RUNTIME_API_EXTERN PackageType
 get_package_type(const uint8 *buf, uint32 size);
 
 
 /* See wasm_export.h for description */
-WASMModuleCommon *
+WASM_RUNTIME_API_EXTERN WASMModuleCommon *
 wasm_runtime_load(const uint8 *buf, uint32 size,
                   char *error_buf, uint32 error_buf_size);
 
 /* See wasm_export.h for description */
-WASMModuleCommon *
+WASM_RUNTIME_API_EXTERN WASMModuleCommon *
 wasm_runtime_load_from_sections(WASMSection *section_list, bool is_aot,
                                 char *error_buf, uint32 error_buf_size);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_unload(WASMModuleCommon *module);
 
 /* Internal API */
@@ -155,58 +379,58 @@ wasm_runtime_deinstantiate_internal(WASMModuleInstanceCommon *module_inst,
                                     bool is_sub_inst);
 
 /* See wasm_export.h for description */
-WASMModuleInstanceCommon *
+WASM_RUNTIME_API_EXTERN WASMModuleInstanceCommon *
 wasm_runtime_instantiate(WASMModuleCommon *module,
                          uint32 stack_size, uint32 heap_size,
                          char *error_buf, uint32 error_buf_size);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_deinstantiate(WASMModuleInstanceCommon *module_inst);
 
 /* See wasm_export.h for description */
-WASMFunctionInstanceCommon *
+WASM_RUNTIME_API_EXTERN WASMFunctionInstanceCommon *
 wasm_runtime_lookup_function(WASMModuleInstanceCommon * const module_inst,
                              const char *name, const char *signature);
 
 /* See wasm_export.h for description */
-WASMExecEnv *
+WASM_RUNTIME_API_EXTERN WASMExecEnv *
 wasm_runtime_create_exec_env(WASMModuleInstanceCommon *module_inst,
                              uint32 stack_size);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_destroy_exec_env(WASMExecEnv *exec_env);
 
 /* See wasm_export.h for description */
-WASMModuleInstanceCommon *
+WASM_RUNTIME_API_EXTERN WASMModuleInstanceCommon *
 wasm_runtime_get_module_inst(WASMExecEnv *exec_env);
 
 /* See wasm_export.h for description */
-void *
+WASM_RUNTIME_API_EXTERN void *
 wasm_runtime_get_function_attachment(WASMExecEnv *exec_env);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_set_user_data(WASMExecEnv *exec_env, void *user_data);
 
 /* See wasm_export.h for description */
-void *
+WASM_RUNTIME_API_EXTERN void *
 wasm_runtime_get_user_data(WASMExecEnv *exec_env);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_call_wasm(WASMExecEnv *exec_env,
                        WASMFunctionInstanceCommon *function,
                        uint32 argc, uint32 argv[]);
 
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_call_wasm_a(WASMExecEnv *exec_env,
                          WASMFunctionInstanceCommon *function,
                          uint32 num_results, wasm_val_t *results,
                          uint32 num_args, wasm_val_t *args);
 
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_call_wasm_v(WASMExecEnv *exec_env,
                          WASMFunctionInstanceCommon *function,
                          uint32 num_results, wasm_val_t *results,
@@ -240,85 +464,85 @@ wasm_runtime_create_exec_env_and_call_wasm(WASMModuleInstanceCommon *module_inst
                                            uint32 argc, uint32 argv[]);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_application_execute_main(WASMModuleInstanceCommon *module_inst,
                               int32 argc, char *argv[]);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_application_execute_func(WASMModuleInstanceCommon *module_inst,
                               const char *name, int32 argc, char *argv[]);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_set_exception(WASMModuleInstanceCommon *module,
                            const char *exception);
 
 /* See wasm_export.h for description */
-const char *
+WASM_RUNTIME_API_EXTERN const char *
 wasm_runtime_get_exception(WASMModuleInstanceCommon *module);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_clear_exception(WASMModuleInstanceCommon *module_inst);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_set_custom_data(WASMModuleInstanceCommon *module_inst,
                              void *custom_data);
 
 /* See wasm_export.h for description */
-void *
+WASM_RUNTIME_API_EXTERN void *
 wasm_runtime_get_custom_data(WASMModuleInstanceCommon *module_inst);
 
 /* See wasm_export.h for description */
-uint32
+WASM_RUNTIME_API_EXTERN uint32
 wasm_runtime_module_malloc(WASMModuleInstanceCommon *module_inst, uint32 size,
                            void **p_native_addr);
 
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_module_free(WASMModuleInstanceCommon *module_inst, uint32 ptr);
 
 /* See wasm_export.h for description */
-uint32
+WASM_RUNTIME_API_EXTERN uint32
 wasm_runtime_module_dup_data(WASMModuleInstanceCommon *module_inst,
                              const char *src, uint32 size);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_validate_app_addr(WASMModuleInstanceCommon *module_inst,
                                uint32 app_offset, uint32 size);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_validate_app_str_addr(WASMModuleInstanceCommon *module_inst,
                                    uint32 app_str_offset);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_validate_native_addr(WASMModuleInstanceCommon *module_inst,
                                   void *native_ptr, uint32 size);
 
 /* See wasm_export.h for description */
-void *
+WASM_RUNTIME_API_EXTERN void *
 wasm_runtime_addr_app_to_native(WASMModuleInstanceCommon *module_inst,
                                 uint32 app_offset);
 
 /* See wasm_export.h for description */
-uint32
+WASM_RUNTIME_API_EXTERN uint32
 wasm_runtime_addr_native_to_app(WASMModuleInstanceCommon *module_inst,
                                 void *native_ptr);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_get_app_addr_range(WASMModuleInstanceCommon *module_inst,
                                 uint32 app_offset,
                                 uint32 *p_app_start_offset,
                                 uint32 *p_app_end_offset);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_get_native_addr_range(WASMModuleInstanceCommon *module_inst,
                                    uint8 *native_ptr,
                                    uint8 **p_native_start_addr,
@@ -339,7 +563,7 @@ wasm_runtime_set_llvm_stack(WASMModuleInstanceCommon *module_inst,
                             uint32 llvm_stack);
 
 #if WASM_ENABLE_MULTI_MODULE != 0
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_set_module_reader(const module_reader reader,
                                const module_destroyer destroyer);
 
@@ -392,7 +616,7 @@ wasm_exec_env_set_aux_stack(WASMExecEnv *exec_env,
 
 #if WASM_ENABLE_LIBC_WASI != 0
 /* See wasm_export.h for description */
-void
+WASM_RUNTIME_API_EXTERN void
 wasm_runtime_set_wasi_args(WASMModuleCommon *module,
                            const char *dir_list[], uint32 dir_count,
                            const char *map_dir_list[], uint32 map_dir_count,
@@ -400,11 +624,11 @@ wasm_runtime_set_wasi_args(WASMModuleCommon *module,
                            char *argv[], int argc);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_is_wasi_mode(WASMModuleInstanceCommon *module_inst);
 
 /* See wasm_export.h for description */
-WASMFunctionInstanceCommon *
+WASM_RUNTIME_API_EXTERN WASMFunctionInstanceCommon *
 wasm_runtime_lookup_wasi_start_function(WASMModuleInstanceCommon *module_inst);
 
 bool
@@ -442,13 +666,13 @@ bool
 wasm_runtime_enlarge_memory(WASMModuleInstanceCommon *module, uint32 inc_page_count);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_register_natives(const char *module_name,
                               NativeSymbol *native_symbols,
                               uint32 n_native_symbols);
 
 /* See wasm_export.h for description */
-bool
+WASM_RUNTIME_API_EXTERN bool
 wasm_runtime_register_natives_raw(const char *module_name,
                                   NativeSymbol *native_symbols,
                                   uint32 n_native_symbols);

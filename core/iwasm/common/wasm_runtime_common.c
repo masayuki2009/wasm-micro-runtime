@@ -1378,6 +1378,23 @@ wasm_runtime_module_malloc(WASMModuleInstanceCommon *module_inst, uint32 size,
     return 0;
 }
 
+uint32
+wasm_runtime_module_realloc(WASMModuleInstanceCommon *module_inst, uint32 ptr,
+                            uint32 size, void **p_native_addr)
+{
+#if WASM_ENABLE_INTERP != 0
+    if (module_inst->module_type == Wasm_Module_Bytecode)
+        return wasm_module_realloc((WASMModuleInstance*)module_inst, ptr,
+                                   size, p_native_addr);
+#endif
+#if WASM_ENABLE_AOT != 0
+    if (module_inst->module_type == Wasm_Module_AoT)
+        return aot_module_realloc((AOTModuleInstance*)module_inst, ptr,
+                                  size, p_native_addr);
+#endif
+    return 0;
+}
+
 void
 wasm_runtime_module_free(WASMModuleInstanceCommon *module_inst, uint32 ptr)
 {
@@ -2325,7 +2342,7 @@ resolve_function(const WASMModuleInstanceCommon *module_inst,
     char *orig_name = NULL;
     char *sub_module_name = NULL;
     char *function_name = NULL;
-    uint32 length = strlen(name) + 1;
+    uint32 length = (uint32)(strlen(name) + 1);
 
     orig_name = runtime_malloc(sizeof(char) * length, NULL, NULL, 0);
     if (!orig_name) {
@@ -2824,20 +2841,6 @@ fail:
 /**
  * Implementation of wasm_runtime_invoke_native()
  */
-
-#define PUT_I64_TO_ADDR(addr, value) do {       \
-    union { int64 val; uint32 parts[2]; } u;    \
-    u.val = (value);                            \
-    (addr)[0] = u.parts[0];                     \
-    (addr)[1] = u.parts[1];                     \
-  } while (0)
-
-#define PUT_F64_TO_ADDR(addr, value) do {       \
-    union { float64 val; uint32 parts[2]; } u;  \
-    u.val = (value);                            \
-    (addr)[0] = u.parts[0];                     \
-    (addr)[1] = u.parts[1];                     \
-  } while (0)
 
 /* The invoke native implementation on ARM platform with VFP co-processor */
 #if defined(BUILD_TARGET_ARM_VFP) \
@@ -3401,7 +3404,7 @@ fail:
 #endif
 
 #if defined(_WIN32) || defined(_WIN32_)
-typedef union __declspec(intrin_type) __declspec(align(1)) v128 {
+typedef union __declspec(intrin_type) __declspec(align(8)) v128 {
     __int8 m128i_i8[16];
     __int16 m128i_i16[8];
     __int32 m128i_i32[4];

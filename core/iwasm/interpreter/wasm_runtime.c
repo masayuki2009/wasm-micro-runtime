@@ -13,6 +13,9 @@
 #if WASM_ENABLE_SHARED_MEMORY != 0
 #include "../common/wasm_shared_memory.h"
 #endif
+#if WASM_ENABLE_THREAD_MGR != 0
+#include "../libraries/thread-mgr/thread_manager.h"
+#endif
 
 static void
 set_error_buf(char *error_buf, uint32 error_buf_size, const char *string)
@@ -1593,18 +1596,34 @@ wasm_create_exec_env_and_call_function(WASMModuleInstance *module_inst,
     WASMExecEnv *exec_env;
     bool ret;
 
-    if (!(exec_env = wasm_exec_env_create(
-                            (WASMModuleInstanceCommon*)module_inst,
-                            module_inst->default_wasm_stack_size))) {
-        wasm_set_exception(module_inst, "allocate memory failed");
-        return false;
-    }
+#if WASM_ENABLE_THREAD_MGR != 0
+    WASMExecEnv *existing_exec_env = NULL;
 
-    /* set thread handle and stack boundary */
-    wasm_exec_env_set_thread_info(exec_env);
+    if (!(existing_exec_env = exec_env =
+        wasm_clusters_search_exec_env(
+            (WASMModuleInstanceCommon*)module_inst))) {
+#endif
+        if (!(exec_env = wasm_exec_env_create(
+                                (WASMModuleInstanceCommon*)module_inst,
+                                module_inst->default_wasm_stack_size))) {
+            wasm_set_exception(module_inst, "allocate memory failed");
+            return false;
+        }
+
+        /* set thread handle and stack boundary */
+        wasm_exec_env_set_thread_info(exec_env);
+#if WASM_ENABLE_THREAD_MGR != 0
+    }
+#endif
 
     ret = wasm_call_function(exec_env, func, argc, argv);
-    wasm_exec_env_destroy(exec_env);
+
+#if WASM_ENABLE_THREAD_MGR != 0
+    /* don't destroy the exec_env if it's searched from the cluster */
+    if (!existing_exec_env)
+#endif
+        wasm_exec_env_destroy(exec_env);
+
     return ret;
 }
 
@@ -1709,6 +1728,41 @@ wasm_module_malloc(WASMModuleInstance *module_inst, uint32 size,
                       "is compiled by wasi-sdk-12.0 or larger version, "
                       "please add -Wl,--export=malloc -Wl,--export=free "
                       " to export malloc and free functions.");
+            wasm_set_exception(module_inst, "app heap corrupted");
+        }
+        else {
+            wasm_set_exception(module_inst, "out of memory");
+        }
+        return 0;
+    }
+    if (p_native_addr)
+        *p_native_addr = addr;
+
+    return (uint32)(addr - memory->memory_data);
+}
+
+uint32
+wasm_module_realloc(WASMModuleInstance *module_inst, uint32 ptr, uint32 size,
+                    void **p_native_addr)
+{
+    WASMMemoryInstance *memory = module_inst->default_memory;
+    uint8 *addr = NULL;
+
+    if (!memory) {
+        wasm_set_exception(module_inst, "uninitialized memory");
+        return 0;
+    }
+
+    if (memory->heap_handle) {
+        addr = mem_allocator_realloc(memory->heap_handle,
+                                     memory->memory_data + ptr, size);
+    }
+
+    /* Only support realloc in WAMR's app heap */
+
+    if (!addr) {
+        if (memory->heap_handle
+            && mem_allocator_is_heap_corrupted(memory->heap_handle)) {
             wasm_set_exception(module_inst, "app heap corrupted");
         }
         else {
@@ -2052,7 +2106,8 @@ wasm_set_aux_stack(WASMExecEnv *exec_env,
         *(int32*)global_addr = start_offset;
         /* The aux stack boundary is a constant value,
             set the value to exec_env */
-        exec_env->aux_stack_boundary = start_offset - size;
+        exec_env->aux_stack_boundary.boundary = start_offset - size;
+        exec_env->aux_stack_bottom.bottom = start_offset;
         return true;
     }
 
