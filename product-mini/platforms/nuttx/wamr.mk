@@ -146,9 +146,17 @@ endif
 
 ifeq ($(CONFIG_INTERPRETERS_WAMR_LIB_PTHREAD),y)
 CFLAGS += -DWASM_ENABLE_LIB_PTHREAD=1
+# test
+CFLAGS += -DWASM_ENABLE_BULK_MEMORY=1
+CFLAGS += -DWASM_ENABLE_SHARED_MEMORY=1
 CSRCS += lib_pthread_wrapper.c
+CSRCS += wasm_shared_memory.c
+CSRCS += wasm_c_api.c
 else
 CFLAGS += -DWASM_ENABLE_LIB_PTHREAD=0
+# test
+CFLAGS += -DWASM_ENABLE_BULK_MEMORY=0
+CFLAGS += -DWASM_ENABLE_SHARED_MEMORY=0
 endif
 
 ifeq ($(CONFIG_INTERPRETERS_WAMR_MINILOADER),y)
@@ -182,8 +190,9 @@ CFLAGS += -Wno-strict-prototypes -Wno-shadow -Wno-unused-variable
 CFLAGS += -Wno-int-conversion -Wno-implicit-function-declaration
 
 CFLAGS += -I${CORE_ROOT} \
-		      -I${IWASM_ROOT}/include \
+          -I${IWASM_ROOT}/include \
           -I${IWASM_ROOT}/common \
+          -I${IWASM_ROOT}/interpreter \
           -I${IWASM_ROOT}/libraries/thread-mgr \
           -I${SHARED_ROOT}/include \
           -I${SHARED_ROOT}/platform/include \
