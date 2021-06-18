@@ -271,6 +271,9 @@ static os_thread_local_attribute uint8 *thread_stack_boundary = NULL;
 uint8 *os_thread_get_stack_boundary()
 {
     pthread_t self;
+#ifdef __NuttX__
+    (void)self;
+#endif
 #ifdef __linux__
     pthread_attr_t attr;
     size_t guard_size;
