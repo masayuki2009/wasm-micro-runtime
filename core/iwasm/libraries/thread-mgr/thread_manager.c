@@ -34,6 +34,9 @@ wasm_cluster_set_max_thread_num(uint32 num)
 bool
 thread_manager_init()
 {
+    /* TODO */
+    memset(&destroy_callback_list_head,
+           0, sizeof(destroy_callback_list_head));
     if (bh_list_init(cluster_list) != 0)
         return false;
     if (os_mutex_init(&cluster_list_lock) != 0)
