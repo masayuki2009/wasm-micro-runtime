@@ -151,17 +151,21 @@ wasm_runtime_malloc(unsigned int size)
         size = 1;
     }
 
-    return wasm_runtime_malloc_internal(size);
+    void *p = wasm_runtime_malloc_internal(size);
+    LOG_VERBOSE("+++ runtime_malloc: size=%u p=%p ", size, p);
+    return p;
 }
 
 void *
 wasm_runtime_realloc(void *ptr, unsigned int size)
 {
+    LOG_VERBOSE("====  runtime_realloc: size=%u p=%p ", size, ptr);
     return wasm_runtime_realloc_internal(ptr, size);
 }
 
 void
 wasm_runtime_free(void *ptr)
 {
+    LOG_VERBOSE("+++ runtime_free: p=%p ", ptr);
     wasm_runtime_free_internal(ptr);
 }
