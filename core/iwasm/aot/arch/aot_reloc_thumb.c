@@ -304,8 +304,8 @@ apply_relocation(AOTModule *module,
             if (error_buf != NULL)
                 snprintf(error_buf, error_buf_size,
                          "Load relocation section failed: "
-                         "invalid relocation type %"PRIu32".",
-                         reloc_type);
+                         "invalid relocation type %u.",
+                         (unsigned)reloc_type);
             return false;
     }
     return true;
