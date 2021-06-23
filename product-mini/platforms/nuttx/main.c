@@ -348,15 +348,15 @@ main(int argc, char *argv[])
     init_args.mem_alloc_option.allocator.free_func = free;
 #endif
 
+#if WASM_ENABLE_LOG != 0
+    bh_log_set_verbose_level(log_verbose_level);
+#endif
+
     /* initialize runtime environment */
     if (!wasm_runtime_full_init(&init_args)) {
         printf("Init runtime environment failed.\n");
         return -1;
     }
-
-#if WASM_ENABLE_LOG != 0
-    bh_log_set_verbose_level(log_verbose_level);
-#endif
 
     /* load WASM byte buffer from WASM bin file */
     if (!(wasm_file_buf =
